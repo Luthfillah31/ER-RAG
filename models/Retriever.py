@@ -1,5 +1,5 @@
 from langchain.retrievers import EnsembleRetriever
-from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceBgeEmbeddings
+#from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceBgeEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain_community.document_loaders import TextLoader
@@ -26,27 +26,30 @@ import re
 from langchain_core.documents import Document
 from langchain.storage import InMemoryStore
 from langchain.retrievers import ParentDocumentRetriever
-
+from langchain_community.embeddings import OllamaEmbeddings
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 import multiprocessing
 from langchain_text_splitters import CharacterTextSplitter
-from FlagEmbedding import BGEM3FlagModel,FlagReranker
+#from FlagEmbedding import BGEM3FlagModel,FlagReranker
 
 class Retriever2:
     def __init__(self, device1,device2,batch_size=64,  
                  hf_path="models/all-Mini-L6-v2", bge_large_path="models/bge-base-en-v1.5", m3_path="models/bge-m3",
                  parent_chunk_size=700,parent_chunk_overlap=150, 
                  child_chunk_size=200,child_chunk_overlap=50, 
-                 separators=['.', "\n", " ", ""], token_path="models/Llama-3-8B-instruct",
+                 separators=['.', "\n", " ", ""], token_path="NousResearch/Meta-Llama-3-8B-Instruct",
                 stopwords_list = 'models/processed_data/stopwords_list.npy',rerank_path ='models/bge-reranker-v2-m3'):
 
-        self.hf_embeddings = HuggingFaceEmbeddings(model_name=hf_path,
-                                                   model_kwargs={"device": device1},
-                                                   encode_kwargs={'batch_size': batch_size,
-                                                                  'normalize_embeddings': True})
-
-        self.reranker = FlagReranker(rerank_path, use_fp16=True,device =device2)
+        #self.hf_embeddings = HuggingFaceEmbeddings(model_name=hf_path,
+        #                                           model_kwargs={"device": device1},
+        #                                           encode_kwargs={'batch_size': batch_size,
+        #                                                          'normalize_embeddings': True})
+        self.hf_embeddings = OllamaEmbeddings(
+            model="nomic-embed-text",
+            base_url="http://localhost:11434" # Use your cloud IP if different
+        )
+        self.reranker = None #FlagReranker(rerank_path, use_fp16=True,device =device2)
         
         self.tokenizer = AutoTokenizer.from_pretrained(token_path)
 
@@ -128,22 +131,24 @@ class Retriever2:
         Chroma().delete_collection()
         torch.torch.cuda.empty_cache()
 
-    def get_result(self, query,k=5,rerank = True):
+    def get_result(self, query, k=5, rerank=True):
         torch.torch.cuda.empty_cache()
         docs = self.retriever.get_relevant_documents(query)
-        print('len docs',len(docs))
-        if docs ==[]:
+        print('len docs', len(docs))
+        
+        if not docs:
             return [""]
-        if len(docs)<=k:
+        if len(docs) <= k or self.reranker is None: # Added check here
             return [doc.page_content for doc in docs]
+            
         with torch.no_grad():
-            sentence_pairs = [[query,doc.page_content]  for doc in docs]
-            sim =  self.reranker.compute_score(sentence_pairs, normalize=True,batch_size=16)
-            indexs = torch.topk(torch.tensor(sim),min(k,len(docs))).indices
+            sentence_pairs = [[query, doc.page_content] for doc in docs]
+            sim = self.reranker.compute_score(sentence_pairs, normalize=True, batch_size=16)
+            indexs = torch.topk(torch.tensor(sim), min(k, len(docs))).indices
             del sim
             torch.torch.cuda.empty_cache()
             docs = [docs[idx].page_content for idx in indexs]
-        return docs 
+        return docs
     
     def contains_year(self,sentence):
         pattern = r'\b(19|20)\d{2}\b'  
@@ -210,10 +215,13 @@ class Retriever2:
                 docs.append(Document(page_content=text, metadata=metadata))
             torch.torch.cuda.empty_cache()
             with torch.no_grad():
-                sentence_pairs = [[query,doc.page_content]  for doc in docs]
-                sim =  self.reranker.compute_score(sentence_pairs, normalize=True,batch_size=25)
-                indexs = torch.topk(torch.tensor(sim),min(task3_topk,len(docs))).indices
-                del sim
+                if self.reranker is not None: # Added check here
+                    sentence_pairs = [[query, doc.page_content] for doc in docs]
+                    sim = self.reranker.compute_score(sentence_pairs, normalize=True, batch_size=25)
+                    indexs = torch.topk(torch.tensor(sim), min(task3_topk, len(docs))).indices
+                    del sim
+                else:
+                    indexs = range(min(task3_topk, len(docs))) # Fallback if no reranker
                 torch.torch.cuda.empty_cache()
 
             search_results = [search_results[idx] for idx in indexs]
