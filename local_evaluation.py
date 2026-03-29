@@ -46,7 +46,7 @@ def parse_response(resp: str):
 
 def trim_predictions_to_max_token_length(prediction):
     """Trims prediction output to 75 tokens"""
-    max_token_length = 75
+    max_token_length = 100
     tokenized_prediction = tokenizer.encode(prediction)
     # We skip the BOS token (index 0) and take the next 75
     trimmed_tokenized_prediction = tokenized_prediction[1: max_token_length+1]
@@ -60,7 +60,7 @@ def generate_predictions(dataset_path, participant_model):
         for i, line in enumerate(tqdm(f, desc="Generating Predictions")):
             
  
-            if i >= 10:
+            if i >= 20:
                 break
                 
             try:
