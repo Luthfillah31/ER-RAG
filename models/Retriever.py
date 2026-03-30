@@ -17,6 +17,9 @@ from langchain.document_transformers import (
     EmbeddingsClusteringFilter,
     EmbeddingsRedundantFilter,
 )
+import requests
+import json
+import os
 import langchain_core
 from langchain.retrievers import MergerRetriever
 import numpy as np
@@ -49,8 +52,14 @@ class Retriever2:
             model="nomic-embed-text",
             base_url="http://localhost:11434" # Use your cloud IP if different
         )
-        self.reranker = None #FlagReranker(rerank_path, use_fp16=True,device =device2)
+        # --- Remove the old FlagReranker logic ---
+        # self.reranker = None 
         
+        # --- Add the secure Jina setup ---
+        self.jina_api_key = os.getenv("JINA_API_KEY")
+        if not self.jina_api_key:
+            print("WARNING: JINA_API_KEY environment variable not found. Reranking will be skipped!")
+
         self.tokenizer = AutoTokenizer.from_pretrained(token_path)
 
         self.parent_text_splitter = CharacterTextSplitter(
@@ -75,7 +84,36 @@ class Retriever2:
         self.grammy_map = np.load('models/processed_data/grammy.npy',allow_pickle=True).tolist()
         self.ticker_name_map,self.ticker_info_map,self.ticker_name_set_map = np.load('models/processed_data/finance_data.npy',allow_pickle=True).tolist()
 
+    def call_jina_reranker(self, query, raw_texts, top_k):
+        """Sends raw text to Jina API and returns the indices of the top ranked documents."""
+        if not self.jina_api_key or not raw_texts:
+            return range(min(top_k, len(raw_texts))) # Fallback to original order if no API key
 
+        url = "https://api.jina.ai/v1/rerank"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.jina_api_key}"
+        }
+        data = {
+            "model": "jina-reranker-v3",
+            "query": query,
+            "top_n": top_k,
+            "documents": raw_texts,
+            "return_documents": False # We only need the index numbers back to save internet bandwidth
+        }
+        
+        try:
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+            results = response.json().get("results", [])
+            
+            # Jina returns a list of dictionaries. We just extract the 'index' number!
+            return [item["index"] for item in results]
+            
+        except Exception as e:
+            print(f"[DEBUG] Jina Reranker Error: {e}")
+            return range(min(top_k, len(raw_texts))) # Fallback to original order if the API fails
+    
     def find_finance_name(self,name):
         name = name.lower().strip()
         if name in self.ticker_info_map.keys():
@@ -141,13 +179,14 @@ class Retriever2:
         if len(docs) <= k or self.reranker is None: # Added check here
             return [doc.page_content for doc in docs]
             
-        with torch.no_grad():
-            sentence_pairs = [[query, doc.page_content] for doc in docs]
-            sim = self.reranker.compute_score(sentence_pairs, normalize=True, batch_size=16)
-            indexs = torch.topk(torch.tensor(sim), min(k, len(docs))).indices
-            del sim
-            torch.torch.cuda.empty_cache()
-            docs = [docs[idx].page_content for idx in indexs]
+        # --- NEW JINA RERANKING ---
+        if self.jina_api_key:
+            raw_texts = [doc.page_content for doc in docs]
+            ranked_indices = self.call_jina_reranker(query, raw_texts, k)
+            docs = [docs[idx].page_content for idx in ranked_indices]
+        else:
+            docs = [doc.page_content for doc in docs[:k]] # Fallback
+            
         return docs
     
     def contains_year(self,sentence):
@@ -188,13 +227,9 @@ class Retriever2:
             else:
                 description = self.oscar_map_dlc[int(year)]
             sentence_pairs = [[query,doc]  for doc in description]
-            torch.torch.cuda.empty_cache()
-            sim = self.reranker.compute_score(sentence_pairs, normalize=True)
-            indexs = torch.topk(torch.tensor(sim),min(10,len(description))).indices
+            # --- NEW JINA RERANKING ---
+            indexs = self.call_jina_reranker(query, description, min(10, len(description)))
             result = str('\n'.join([description[idx] for idx in indexs]))
-             
-            del sim 
-            torch.torch.cuda.empty_cache()
             return result
         return None
 
@@ -213,16 +248,12 @@ class Retriever2:
                 if len(inputs)==max_length:
                     text = self.tokenizer.decode(inputs)
                 docs.append(Document(page_content=text, metadata=metadata))
-            torch.torch.cuda.empty_cache()
-            with torch.no_grad():
-                if self.reranker is not None: # Added check here
-                    sentence_pairs = [[query, doc.page_content] for doc in docs]
-                    sim = self.reranker.compute_score(sentence_pairs, normalize=True, batch_size=25)
-                    indexs = torch.topk(torch.tensor(sim), min(task3_topk, len(docs))).indices
-                    del sim
-                else:
-                    indexs = range(min(task3_topk, len(docs))) # Fallback if no reranker
-                torch.torch.cuda.empty_cache()
+            # --- NEW JINA RERANKING ---
+            if self.jina_api_key:
+                raw_texts = [doc.page_content for doc in docs]
+                indexs = self.call_jina_reranker(query, raw_texts, task3_topk)
+            else:
+                indexs = range(min(task3_topk, len(docs))) # Fallback
 
             search_results = [search_results[idx] for idx in indexs]
             docs = [docs[i] for  i in range(len(docs)) if i not in indexs]
