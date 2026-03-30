@@ -3,3 +3,4 @@ __pycache__
 api_responses/*.json# pixi environments
 .pixi/*
 !.pixi/config.toml
+.env
