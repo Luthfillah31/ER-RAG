@@ -60,7 +60,7 @@ def generate_predictions(dataset_path, participant_model):
         for i, line in enumerate(tqdm(f, desc="Generating Predictions")):
             
  
-            if i >= 20:
+            if i >= 30:
                 break
                 
             try:
@@ -68,7 +68,11 @@ def generate_predictions(dataset_path, participant_model):
                 query = data["query"]
                 web_search_results = data.get("search_results", [])
                 
-                prediction = participant_model.generate_answer(query, web_search_results)
+                # --- 1. EXTRACT THE TIME FROM THE DATASET ---
+                query_time = data.get("query_time", "2024-03-08 00:00:00") 
+                
+                # --- 2. PASS THE TIME TO THE GENERATOR ---
+                prediction = participant_model.generate_answer(query, web_search_results, query_time)
                 prediction = trim_predictions_to_max_token_length(prediction)
                 
                 predictions.append({

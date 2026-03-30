@@ -187,7 +187,7 @@ class RAGModel:
             for snippet in res_str[:]:
                 context_str += "<DOC>\n" + snippet + "\n</DOC>\n"
                 
-            context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, add_special_tokens=False)
+            context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, truncation=True, add_special_tokens=False)
             print('len context_str', len(context_str_tokens))
             
             if len(context_str_tokens) >= 4000:
@@ -340,7 +340,7 @@ class RAGModel:
             elif 'page_result' in snippet:
                 context_str += "<DOC>\n" + str(snippet['page_result'])[:500] + "\n</DOC>\n"
             
-        context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, add_special_tokens=False)
+        context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, truncation=True, add_special_tokens=False)
         print('len context_str', len(context_str_tokens))
         
         if len(context_str_tokens) >= 4000:

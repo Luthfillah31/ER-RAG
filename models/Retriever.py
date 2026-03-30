@@ -20,6 +20,7 @@ from langchain.document_transformers import (
 import requests
 import json
 import os
+from dotenv import load_dotenv
 import langchain_core
 from langchain.retrievers import MergerRetriever
 import numpy as np
@@ -35,7 +36,7 @@ from tqdm import tqdm
 import multiprocessing
 from langchain_text_splitters import CharacterTextSplitter
 #from FlagEmbedding import BGEM3FlagModel,FlagReranker
-
+load_dotenv()
 class Retriever2:
     def __init__(self, device1,device2,batch_size=64,  
                  hf_path="models/all-Mini-L6-v2", bge_large_path="models/bge-base-en-v1.5", m3_path="models/bge-m3",
@@ -169,7 +170,7 @@ class Retriever2:
         Chroma().delete_collection()
         torch.torch.cuda.empty_cache()
 
-    def get_result(self, query, k=5, rerank=True):
+    def get_result(self, query, k=20, rerank=True):
         torch.torch.cuda.empty_cache()
         docs = self.retriever.get_relevant_documents(query)
         print('len docs', len(docs))
@@ -228,12 +229,12 @@ class Retriever2:
                 description = self.oscar_map_dlc[int(year)]
             sentence_pairs = [[query,doc]  for doc in description]
             # --- NEW JINA RERANKING ---
-            indexs = self.call_jina_reranker(query, description, min(10, len(description)))
+            indexs = self.call_jina_reranker(query, description, min(20, len(description)))
             result = str('\n'.join([description[idx] for idx in indexs]))
             return result
         return None
 
-    def init_retriever(self, search_results, recall_k=50, task3_topk = 5,max_length= 12000, task3 = False, separator=' ', method='ensemble', query=None, riddle=100,time_half_limit=1):
+    def init_retriever(self, search_results, recall_k=50, task3_topk = 20,max_length= 12000, task3 = False, separator=' ', method='ensemble', query=None, riddle=100,time_half_limit=1):
         st = time()
         self.method = method
         docs = []

@@ -17,6 +17,7 @@ packaging = "<24"
 huggingface_hub = "<0.23.0"
 async-timeout = "<5"
 intel-openmp = ">=2024.2.1,<2025"
+python-dotenv = ">=1.2.2,<2"
 
 [pypi-dependencies]
 ollama = ">=0.6.1, <0.7"
