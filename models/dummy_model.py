@@ -47,7 +47,7 @@ class RAGModel:
         print("-------------------------Loading RET----------------------")
         t1 = time.time()
         
-        self.k = 5
+        self.k = 20
         self.r = Retriever.Retriever2(batch_size=64, device1=self.used1, device2=self.used2,
                                       hf_path="models/all-Mini-L6-v2", parent_chunk_size=2000, parent_chunk_overlap=400,
                                       child_chunk_size=200, child_chunk_overlap=50)
@@ -160,7 +160,7 @@ class RAGModel:
             {"role": "user", "content": filled_template},
         ]
         
-        output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=75)
+        output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
         print("edn api prompt", output, time.time() - t1)
         
         if domain in ['finance']:
@@ -185,7 +185,7 @@ class RAGModel:
             for snippet in res_str[:]:
                 context_str += "<DOC>\n" + snippet + "\n</DOC>\n"
                 
-            context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, truncation=True, add_special_tokens=False)
+            context_str_tokens = self.tokenizer.encode(context_str, max_length=20000, truncation=True, add_special_tokens=False)
             print('len context_str', len(context_str_tokens))
             
             if len(context_str_tokens) >= 4000:
@@ -208,7 +208,7 @@ class RAGModel:
                     {"role": "user", "content": filled_template},
                 ]
                 
-            output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=75)
+            output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
             print("edn api", time.time() - t1)
             
             if "i don't know" not in output:
@@ -231,7 +231,7 @@ class RAGModel:
                      "content": f"You are a helpful and honest assistant. Please, respond concisely and truthfully in 30 words or less. If you are not sure about the query, answer i don't know. There is no need to explain the reasoning behind your answers. Now is {query_time}"},
                     {"role": "user", "content": filled_template},
                 ]
-                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=70)
+                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
                 print("end oscar", time.time() - t1)
                 if "i don't know" not in output and "invalid" not in output:
                     return output, context_str
@@ -244,7 +244,7 @@ class RAGModel:
                      "content": f" You will be asked a lot of questions, but you don't need to answer them, just point out the name of the movie involved."},
                     {"role": "user", "content": filled_template},
                 ]
-                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=70)
+                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
                 print("end ask movie name", time.time() - t1)
                 if "i don't know" not in output:
                     try:
@@ -267,7 +267,7 @@ class RAGModel:
                      "content": f"You are a helpful and honest assistant. Please, respond concisely and truthfully in 30 words or less. If you are not sure about the query, answer i don't know. There is no need to explain the reasoning behind your answers. Now is {query_time}"},
                     {"role": "user", "content": filled_template},
                 ]
-                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=70)
+                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
                 print("edn music", output, time.time() - t1)
                 if "i don't know" not in output and "invalid" not in output:
                     return output, context_str
@@ -282,7 +282,7 @@ class RAGModel:
                      "content": f" You will be asked a lot of questions, but you don't need to answer them, just point out the specific stock ticker or company name involved."},
                     {"role": "user", "content": filled_template},
                 ]
-                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=70)
+                output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
                 print("edn ask name", output, time.time() - t1)
                 if "i don't know" not in output and 'none' not in output:
                     try:
@@ -296,7 +296,7 @@ class RAGModel:
                              "content": f"You are a helpful and honest assistant. Please, respond concisely and truthfully in 30 words or less. If you are not sure about the query, answer i don't know. There is no need to explain the reasoning behind your answers. Now is {query_time}"},
                             {"role": "user", "content": filled_template},
                         ]
-                        output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=70)
+                        output, minn_logit, mean_logit = self.llam3_output(messages, maxtoken=500)
                         print("edn finance", time.time() - t1)
                         if "i don't know" not in output and "invalid" not in output:
                             return output, context_str
@@ -331,10 +331,10 @@ class RAGModel:
                 
         # FIX: Restore the actual Retriever pipeline
         print("[DEBUG] Initializing Retriever...")
-        retriever_success = self.r.init_retriever(search_results, recall_k=100, task3_topk=20, query=query)
+        retriever_success = self.r.init_retriever(search_results, recall_k=200, task3_topk=30, query=query)
         
         if retriever_success:
-            docs = self.r.get_result(query, k=20)
+            docs = self.r.get_result(query, k=30)
             for doc in docs:
                 context_str += f"<DOC>\n{doc}\n</DOC>\n"
         else:
@@ -343,7 +343,7 @@ class RAGModel:
                 text = snippet.get('page_snippet', snippet.get('page_result', ''))[:500]
                 context_str += f"<DOC>\n{text}\n</DOC>\n"
             
-        context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, truncation=True, add_special_tokens=False)
+        context_str_tokens = self.tokenizer.encode(context_str, max_length=20000, truncation=True, add_special_tokens=False)
         context_str = self.tokenizer.decode(context_str_tokens)
             
         filled_template = template_map['output_answer_nofalse'].format(context_str=context_str, query_str=query)
