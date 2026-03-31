@@ -243,7 +243,7 @@ class Retriever2:
             return result
         return None
 
-    def init_retriever(self, search_results, recall_k=50, task3_topk = 20, max_length= 12000, task3 = False, separator=' ', method='ensemble', query=None, riddle=100,time_half_limit=1):
+    def init_retriever(self, search_results, recall_k=100, task3_topk = 20, max_length= 12000, task3 = False, separator=' ', method='ensemble', query=None, riddle=100,time_half_limit=1):
         st = time()
         self.method = method
         docs = []

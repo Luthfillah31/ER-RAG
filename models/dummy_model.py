@@ -74,21 +74,24 @@ class RAGModel:
                 return key
         return 'open'
 
-    def llam3_output(self, messages, maxtoken=75, disable_adapter=False):
+    def llam3_output(self, messages, maxtoken=500, disable_adapter=False):
+        # Increased maxtoken to 500 so DeepSeek has room to "think" before answering
+        import time
+        import requests
         t1 = time.time()
-        
-        prompt = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
 
         try:
-            print(f"\n[DEBUG {time.strftime('%H:%M:%S')}] Sending request to Ollama ({self.ollama_model})...")
+            print(f"\n[DEBUG {time.strftime('%H:%M:%S')}] Sending request to Ollama Chat API ({self.ollama_model})...")
             
-            response = requests.post(self.ollama_api_url, json={
+            # Use /api/chat and pass the messages list directly!
+            # This prevents Llama-3 tokens from poisoning the DeepSeek prompt.
+            chat_url = self.ollama_api_url.replace("/api/generate", "/api/chat")
+            if not chat_url.endswith("/api/chat"):
+                 chat_url = "http://localhost:11434/api/chat"
+                 
+            response = requests.post(chat_url, json={
                 "model": self.ollama_model,
-                "prompt": prompt,
+                "messages": messages,
                 "stream": False,
                 "options": {
                     "temperature": 0.1,  
@@ -98,19 +101,13 @@ class RAGModel:
             }, timeout=120) 
             
             if response.status_code == 429:
-                print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR 429: Rate Limit Hit!")
                 return "i don't know", 0, 0
                 
             response.raise_for_status()
             
-            output = response.json().get('response', '').lower().strip()
+            # Extract output correctly from the Chat API response
+            output = response.json().get('message', {}).get('content', '').lower().strip()
             
-            # FIX: Only strip specific assistant tokens, don't split on the english word "assistant"
-            if output.startswith("assistant:"):
-                output = output.replace("assistant:", "", 1).strip()
-            elif "<|assistant|>" in output:
-                output = output.split("<|assistant|>")[-1].strip()
-
             print(f"[DEBUG {time.strftime('%H:%M:%S')}] Success! Received response in {time.time() - t1:.2f} seconds.")
             return output, 0, 0
             
@@ -118,7 +115,7 @@ class RAGModel:
             print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR: Request timed out.")
             return "i don't know", 0, 0
         except Exception as e:
-            print(f"[DEBUG {time.strftime('%H:%M:%S')}] UNEXPECTED ERROR: {type(e).__name__}: {str(e)}")
+            print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR: {type(e).__name__}: {str(e)}")
             return "i don't know", 0, 0
 
     def get_batch_size(self) -> int:
@@ -334,10 +331,10 @@ class RAGModel:
                 
         # FIX: Restore the actual Retriever pipeline
         print("[DEBUG] Initializing Retriever...")
-        retriever_success = self.r.init_retriever(search_results, recall_k=20, task3_topk=10, query=query)
+        retriever_success = self.r.init_retriever(search_results, recall_k=100, task3_topk=20, query=query)
         
         if retriever_success:
-            docs = self.r.get_result(query, k=5)
+            docs = self.r.get_result(query, k=20)
             for doc in docs:
                 context_str += f"<DOC>\n{doc}\n</DOC>\n"
         else:

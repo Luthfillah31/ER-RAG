@@ -21,6 +21,8 @@ python-dotenv = ">=1.2.2,<2"
 pyarrow = ">=20.0.0,<21"
 scikit-learn = ">=1.7.2,<2"
 sentence-transformers = ">=3.2.0,<4"
+ipykernel = ">=7.2.0,<8"
+regex = ">=2026.3.32,<2027"
 
 [pypi-dependencies]
 ollama = ">=0.6.1, <0.7"
