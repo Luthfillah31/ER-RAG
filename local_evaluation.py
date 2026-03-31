@@ -58,8 +58,7 @@ def generate_predictions(dataset_path, participant_model):
     with bz2.open(dataset_path, 'rt', encoding='utf-8') as f:
         # We add 'enumerate' so Python counts which question we are on
         for i, line in enumerate(tqdm(f, desc="Generating Predictions")):
-            
- 
+
             if i >= 30:
                 break
                 
@@ -128,6 +127,8 @@ def evaluate_predictions(predictions, evaluation_model_name, openai_client):
 
 if __name__ == "__main__":
     from models.user_config import UserModel
+    import os
+    from openai import OpenAI
 
     DATASET_PATH = "example_data/dev_data.jsonl.bz2"
 
@@ -137,9 +138,26 @@ if __name__ == "__main__":
     # 2. Generate predictions
     predictions = generate_predictions(DATASET_PATH, participant_model)
 
-    # 3. Just print the results (Bypassing OpenAI)
+    # 3. Use the LLM Judge to Evaluate (Requires OPENAI_API_KEY in your .env)
     print("\n" + "="*50)
-    print("RESULTS SUMMARY")
+    print("EVALUATING WITH LLM JUDGE")
+    print("="*50)
+    
+    try:
+        openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Using gpt-4o-mini as a fast, cheap judge
+        results = evaluate_predictions(predictions, "gpt-4o-mini", openai_client) 
+        
+        print("\nFINAL SCORES:")
+        print(f"Accuracy: {results['accuracy']:.2%}")
+        print(f"CRAG Score: {results['score']:.4f}")
+        
+    except Exception as e:
+        print(f"Failed to run OpenAI Evaluation: {e}")
+        print("Ensure OPENAI_API_KEY is set in your environment.")
+
+    print("\n" + "="*50)
+    print("PREDICTION LOG")
     print("="*50)
     for p in predictions:
         print(f"Query: {p['query']}")

@@ -28,13 +28,18 @@ class RAGModel:
 
         num_gpus = torch.cuda.device_count()
 
-        if num_gpus <= 2:
-            self.used1 = "cuda:1"
-            self.used2 = "cuda:1"
-            self.used = 'cuda:1'
+        if not torch.cuda.is_available() or num_gpus == 0:
+            print("[DEBUG] CUDA not compiled or no GPU found. Using CPU for embeddings.")
+            self.used1 = "cpu"
+            self.used2 = "cpu"
+            self.used = "cpu"
+        elif num_gpus == 1:
+            self.used1 = "cuda:0"
+            self.used2 = "cuda:0"
+            self.used = "cuda:0"
         else:
             self.used1 = "cuda:1"
-            self.used2 = "cuda:2"
+            self.used2 = "cuda:1"
             self.used = "cuda:1"
 
         print("finish configuring LLM via Ollama", time.time() - t1)
@@ -50,24 +55,28 @@ class RAGModel:
         print("finish loading RET", time.time() - t1)
         self.r.clear()
 
-    def llama3_domain(self, query):
+    def llama3_domain(self, query, search_results=None):
+        context_hint = ""
+        # FIX: Give the classifier a tiny hint of context so it doesn't guess blindly
+        if search_results and len(search_results) > 0:
+             snippet = search_results[0].get('page_snippet', '')
+             context_hint = f"\n Context hint: {snippet[:150]}"
+             
         messages = [
             {"role": "system", "content": f"You are an assistant expert in movie, sports, finance and music fields."},
             {"role": "user",
-             "content": "Please judge which category the query belongs to, without answering the query. you can only and must output one word in (movie, sports, finance, music) If the question doesn't belong to movie, sports,finance, music, please answer other. \n Query:" + query + '\n Category:'},
+             "content": "Please judge which category the query belongs to, without answering the query. you can only and must output one word in (movie, sports, finance, music) If the question doesn't belong to movie, sports,finance, music, please answer open. \n Query:" + query + context_hint + '\n Category:'},
         ]
-        domain, _, _ = self.llam3_output(messages, maxtoken=3)
+        domain, _, _ = self.llam3_output(messages, maxtoken=5)
+        
         for key in ['finance', 'music', 'sports', 'movie']:
             if key in domain:
                 return key
         return 'open'
 
     def llam3_output(self, messages, maxtoken=75, disable_adapter=False):
-        # Time check
-        
         t1 = time.time()
         
-        # Format the chat messages into a single prompt string
         prompt = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
@@ -75,10 +84,8 @@ class RAGModel:
         )
 
         try:
-            # 1. LOG THE START TIME
             print(f"\n[DEBUG {time.strftime('%H:%M:%S')}] Sending request to Ollama ({self.ollama_model})...")
             
-            # 2. ADD TIMEOUT (120 seconds) to prevent infinite hanging
             response = requests.post(self.ollama_api_url, json={
                 "model": self.ollama_model,
                 "prompt": prompt,
@@ -90,31 +97,25 @@ class RAGModel:
                 }
             }, timeout=120) 
             
-            # 3. EXPLICIT RATE LIMIT CHECK
             if response.status_code == 429:
-                print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR 429: Rate Limit Hit! Too many requests.")
+                print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR 429: Rate Limit Hit!")
                 return "i don't know", 0, 0
                 
             response.raise_for_status()
             
             output = response.json().get('response', '').lower().strip()
-            # Clean up potential assistant prefix issues
-            if "assistant" in output:
-                output = output.split("assistant")[-1].strip()
+            
+            # FIX: Only strip specific assistant tokens, don't split on the english word "assistant"
+            if output.startswith("assistant:"):
+                output = output.replace("assistant:", "", 1).strip()
+            elif "<|assistant|>" in output:
+                output = output.split("<|assistant|>")[-1].strip()
 
-            # 4. LOG THE SUCCESS AND DURATION
             print(f"[DEBUG {time.strftime('%H:%M:%S')}] Success! Received response in {time.time() - t1:.2f} seconds.")
             return output, 0, 0
             
-        # 5. CATCH SPECIFIC ERRORS SO THEY AREN'T SILENT
         except requests.exceptions.Timeout:
-            print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR: Request timed out after 120 seconds! Model is too slow.")
-            return "i don't know", 0, 0
-        except requests.exceptions.ConnectionError:
-            print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR: Connection refused. Is your Ollama server running?")
-            return "i don't know", 0, 0
-        except requests.exceptions.HTTPError as e:
-            print(f"[DEBUG {time.strftime('%H:%M:%S')}] HTTP ERROR: {e.response.status_code} - {e.response.text}")
+            print(f"[DEBUG {time.strftime('%H:%M:%S')}] ERROR: Request timed out.")
             return "i don't know", 0, 0
         except Exception as e:
             print(f"[DEBUG {time.strftime('%H:%M:%S')}] UNEXPECTED ERROR: {type(e).__name__}: {str(e)}")
@@ -317,7 +318,8 @@ class RAGModel:
         self.r.clear()
 
         print("determine compare")
-        domain = self.llama3_domain(query)
+        # FIX: Pass search results so the classifier has a hint
+        domain = self.llama3_domain(query, search_results) 
         print("judge domain", domain)
         context_str = ""
         
@@ -330,23 +332,22 @@ class RAGModel:
             if output!="":
                 return output
                 
-        # --- THE CHROMADB BYPASS ---
-        # Instead of hanging in ChromaDB, we grab the search text directly!
-        print("[DEBUG] Bypassing ChromaDB... extracting text directly.")
+        # FIX: Restore the actual Retriever pipeline
+        print("[DEBUG] Initializing Retriever...")
+        retriever_success = self.r.init_retriever(search_results, recall_k=20, task3_topk=10, query=query)
         
-        for snippet in search_results[:5]:
-            if 'page_snippet' in snippet:
-                context_str += "<DOC>\n" + snippet['page_snippet'] + "\n</DOC>\n"
-            elif 'page_result' in snippet:
-                context_str += "<DOC>\n" + str(snippet['page_result'])[:500] + "\n</DOC>\n"
+        if retriever_success:
+            docs = self.r.get_result(query, k=5)
+            for doc in docs:
+                context_str += f"<DOC>\n{doc}\n</DOC>\n"
+        else:
+            print("[DEBUG] Retriever failed or no docs. Falling back to snippets.")
+            for snippet in search_results[:5]:
+                text = snippet.get('page_snippet', snippet.get('page_result', ''))[:500]
+                context_str += f"<DOC>\n{text}\n</DOC>\n"
             
         context_str_tokens = self.tokenizer.encode(context_str, max_length=4000, truncation=True, add_special_tokens=False)
-        print('len context_str', len(context_str_tokens))
-        
-        if len(context_str_tokens) >= 4000:
-            context_str = self.tokenizer.decode(context_str_tokens) + "\n</DOC>\n"
-        else:
-            context_str = self.tokenizer.decode(context_str_tokens)
+        context_str = self.tokenizer.decode(context_str_tokens)
             
         filled_template = template_map['output_answer_nofalse'].format(context_str=context_str, query_str=query)
 
@@ -356,7 +357,6 @@ class RAGModel:
             {"role": "user", "content": filled_template},
         ]
 
-        # Final call to DeepSeek
         output, minn_logit, mean_logit = self.llam3_output(messages)
 
         if "i don't know" not in output and output not in ['i', "i don't"]:

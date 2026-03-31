@@ -1,5 +1,5 @@
 from langchain.retrievers import EnsembleRetriever
-#from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceBgeEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings, HuggingFaceBgeEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import Chroma
 from langchain_community.document_loaders import TextLoader
@@ -49,10 +49,17 @@ class Retriever2:
         #                                           model_kwargs={"device": device1},
         #                                           encode_kwargs={'batch_size': batch_size,
         #                                                          'normalize_embeddings': True})
-        self.hf_embeddings = OllamaEmbeddings(
-            model="nomic-embed-text",
-            base_url="http://localhost:11434" # Use your cloud IP if different
+
+        self.hf_embeddings = HuggingFaceEmbeddings(
+            model_name=hf_path,
+            model_kwargs={"device": device1},
+            encode_kwargs={'batch_size': batch_size, 'normalize_embeddings': True}
         )
+
+        #self.hf_embeddings = OllamaEmbeddings(
+        #    model="nomic-embed-text",
+        #    base_url="http://localhost:11434" # Use your cloud IP if different
+        #)
         # --- Remove the old FlagReranker logic ---
         # self.reranker = None 
         
@@ -177,15 +184,17 @@ class Retriever2:
         
         if not docs:
             return [""]
-        if len(docs) <= k or self.reranker is None: # Added check here
-            return [doc.page_content for doc in docs]
             
         # --- NEW JINA RERANKING ---
-        if self.jina_api_key:
+        if self.jina_api_key and rerank and len(docs) > 1:
+            print("[DEBUG] Calling Jina API for Reranking...")
             raw_texts = [doc.page_content for doc in docs]
             ranked_indices = self.call_jina_reranker(query, raw_texts, k)
-            docs = [docs[idx].page_content for idx in ranked_indices]
+            # Make sure we don't go out of bounds if Jina returns weird indices
+            valid_indices = [idx for idx in ranked_indices if idx < len(docs)]
+            docs = [docs[idx].page_content for idx in valid_indices]
         else:
+            print("[DEBUG] Bypassing Jina API, using default ordering...")
             docs = [doc.page_content for doc in docs[:k]] # Fallback
             
         return docs
@@ -234,7 +243,7 @@ class Retriever2:
             return result
         return None
 
-    def init_retriever(self, search_results, recall_k=50, task3_topk = 20,max_length= 12000, task3 = False, separator=' ', method='ensemble', query=None, riddle=100,time_half_limit=1):
+    def init_retriever(self, search_results, recall_k=50, task3_topk = 20, max_length= 12000, task3 = False, separator=' ', method='ensemble', query=None, riddle=100,time_half_limit=1):
         st = time()
         self.method = method
         docs = []
