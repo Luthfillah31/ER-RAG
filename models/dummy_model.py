@@ -67,7 +67,7 @@ class RAGModel:
             {"role": "user",
              "content": "Please judge which category the query belongs to, without answering the query. you can only and must output one word in (movie, sports, finance, music) If the question doesn't belong to movie, sports,finance, music, please answer open. \n Query:" + query + context_hint + '\n Category:'},
         ]
-        domain, _, _ = self.llam3_output(messages, maxtoken=5)
+        domain, _, _ = self.llam3_output(messages, maxtoken=200)
         
         for key in ['finance', 'music', 'sports', 'movie']:
             if key in domain:
@@ -338,10 +338,38 @@ class RAGModel:
             for doc in docs:
                 context_str += f"<DOC>\n{doc}\n</DOC>\n"
         else:
-            print("[DEBUG] Retriever failed or no docs. Falling back to snippets.")
-            for snippet in search_results[:5]:
-                text = snippet.get('page_snippet', snippet.get('page_result', ''))[:500]
-                context_str += f"<DOC>\n{text}\n</DOC>\n"
+            print("[DEBUG] Retriever failed or no docs. Filtering snippets with LLM.")
+            raw_snippets = ""
+            # Gather snippets to present to the LLM
+            for i, snippet in enumerate(search_results[:8]): 
+                text = snippet.get('page_snippet', snippet.get('page_result', ''))[:400]
+                raw_snippets += f"[Snippet {i+1}]: {text}\n"
+            
+            # Ask the LLM to extract only relevant facts
+            filter_prompt = f"""You are an expert fact-checker. Read the following search snippets and extract ONLY the facts that directly answer the query. If the snippets do not contain the answer, you MUST reply exactly with "NO_RELEVANT_INFO". Do not guess.
+
+Query: {query}
+
+Snippets:
+{raw_snippets}
+
+Extracted Facts:"""
+
+            filter_messages = [
+                {"role": "system", "content": "You are a strict information extractor."},
+                {"role": "user", "content": filter_prompt}
+            ]
+            
+            # Call Ollama to filter the snippets
+            filtered_info, _, _ = self.llam3_output(filter_messages, maxtoken=300)
+            
+            # If the LLM determines the snippets are garbage, leave context empty to trigger "I don't know"
+            if "NO_RELEVANT_INFO" in filtered_info or "no relevant info" in filtered_info.lower():
+                print("[DEBUG] LLM determined snippets are irrelevant. Proceeding with empty context.")
+                context_str += "" 
+            else:
+                print(f"[DEBUG] LLM extracted relevant info: {filtered_info[:100]}...")
+                context_str += f"<DOC>\n{filtered_info}\n</DOC>\n"
             
         context_str_tokens = self.tokenizer.encode(context_str, max_length=20000, truncation=True, add_special_tokens=False)
         context_str = self.tokenizer.decode(context_str_tokens)

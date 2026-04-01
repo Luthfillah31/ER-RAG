@@ -36,6 +36,16 @@ from tqdm import tqdm
 import multiprocessing
 from langchain_text_splitters import CharacterTextSplitter
 #from FlagEmbedding import BGEM3FlagModel,FlagReranker
+# Modifikasi pada Retriever.py
+from langchain.retrievers import EnsembleRetriever
+# ... (import lainnya)
+from FlagEmbedding import FlagReranker # Pastikan library ini terinstal
+import torch
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from langchain_core.documents import Document
+from time import time
+import numpy as np
+import os
 load_dotenv()
 class Retriever2:
     def __init__(self, device1,device2,batch_size=64,  
@@ -43,7 +53,7 @@ class Retriever2:
                  parent_chunk_size=700,parent_chunk_overlap=150, 
                  child_chunk_size=200,child_chunk_overlap=50, 
                  separators=['.', "\n", " ", ""], token_path="NousResearch/Meta-Llama-3-8B-Instruct",
-                stopwords_list = 'models/processed_data/stopwords_list.npy',rerank_path ='models/bge-reranker-v2-m3'):
+                stopwords_list = 'models/processed_data/stopwords_list.npy',reranker_path="models/bge-reranker-v2-m3"):
 
         #self.hf_embeddings = HuggingFaceEmbeddings(model_name=hf_path,
         #                                           model_kwargs={"device": device1},
@@ -91,7 +101,39 @@ class Retriever2:
         
         self.grammy_map = np.load('models/processed_data/grammy.npy',allow_pickle=True).tolist()
         self.ticker_name_map,self.ticker_info_map,self.ticker_name_set_map = np.load('models/processed_data/finance_data.npy',allow_pickle=True).tolist()
+# Inisialisasi Reranker Lokal
+        print(f"[DEBUG] Loading Local Reranker from: {reranker_path}")
+        try:
+            self.rerank_tokenizer = AutoTokenizer.from_pretrained(reranker_path)
+            self.rerank_model = AutoModelForSequenceClassification.from_pretrained(reranker_path)
+            self.rerank_model.eval()
+            if torch.cuda.is_available():
+                self.rerank_model.cuda()
+            print("[DEBUG] Local Reranker Loaded Successfully.")
+        except Exception as e:
+            print(f"[ERROR] Failed to load local reranker: {e}")
+            self.rerank_model = None
 
+    def local_rerank(self, query, documents, top_n=5):
+        if self.rerank_model is None:
+            print("[DEBUG] Reranker not available, skipping...")
+            return documents[:top_n]
+
+        print(f"[DEBUG] Reranking {len(documents)} docs for query: {query[:50]}...")
+        pairs = [[query, doc.page_content] for doc in documents]
+        
+        with torch.no_grad():
+            inputs = self.rerank_tokenizer(pairs, padding=True, truncation=True, return_tensors='pt', max_length=512)
+            if torch.cuda.is_available():
+                inputs = {k: v.cuda() for k, v in inputs.items()}
+            
+            scores = self.rerank_model(**inputs).logits.view(-1,).float()
+            # BGE v2 m3 scores are usually raw logits
+            combined = list(zip(documents, scores.cpu().tolist()))
+            combined.sort(key=lambda x: x[1], reverse=True)
+            
+        print(f"[DEBUG] Reranking complete. Top score: {combined[0][1]:.4f}")
+        return [x[0] for x in combined[:top_n]]
     def call_jina_reranker(self, query, raw_texts, top_k):
         """Sends raw text to Jina API and returns the indices of the top ranked documents."""
         if not self.jina_api_key or not raw_texts:
@@ -286,11 +328,7 @@ class Retriever2:
             metadata ={}
             metadata["start_index"] =idx
             docs.append(Document(page_content=text, metadata=metadata))
-         
- 
-                    
-        
-        
+                
         print('get_text',time()-st)
 
         if len(docs) == 0:

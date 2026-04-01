@@ -44,11 +44,12 @@ echo "Total build time: $BUILD_TIME seconds"
 # 'python /submission/local_evaluation.py' is the command executed inside the container.
 # the -w sets the workind directory to /submission.
 # It then local_evaluation.py using software runtime set up in the Dockerfile.
-docker run \
-    --gpus all \
+MSYS_NO_PATHCONV=1 docker run \
+    --add-host=host.docker.internal:host-gateway \
     -v "$(pwd)":/submission \
     -w /submission \
     -e OPENAI_API_KEY=$OPENAI_API_KEY \
+    -e CRAG_MOCK_API_URL="http://host.docker.internal:8000" \
     $IMAGE_NAME python local_evaluation.py
 
 # Note: We assume you have nvidia-container-toolkit installed and configured 

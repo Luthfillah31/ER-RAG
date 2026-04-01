@@ -1,1 +1,18 @@
-models/**
+.git/
+.idea/
+.conda/
+.pixi/
+__pycache__/
+
+# Abaikan folder model dan data yang berat
+models/pretrain_models/
+models/processed_data/
+models/all-Mini-L6-v2/
+models/Llama-3-8B-instruct/
+models/bge-reranker-v2-m3/
+example_data/
+
+# Abaikan file zip/tar jika ada
+*.zip
+*.tar.gz
+*.bz2

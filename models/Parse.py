@@ -225,25 +225,29 @@ def clear_conds(conds):
 
 
 def get_mathed_result(info, name):
-    if len(info) == 0:
+    if info is None or len(info) == 0:
         print('no result')
         return []
+    
     for item in info:
+        if not isinstance(item, dict): continue
         if 'title' in item.keys():
-            if item['title'].lower().strip() == name or item['original_title'].lower().strip() == name:
+            if item['title'].lower().strip() == name or item.get('original_title', '').lower().strip() == name:
                 return item
         elif 'name' in item.keys():
-            if item['name'].lower().strip() == name or item['name'].lower().strip() == name:
+            if item['name'].lower().strip() == name:
                 return item
 
     for item in info:
+        if not isinstance(item, dict): continue
         if 'title' in item.keys():
-            if name in item['title'].lower().strip() or name in item['original_title'].lower().strip():
+            if name in item['title'].lower().strip() or name in item.get('original_title', '').lower().strip():
                 return item
         elif 'name' in item.keys():
-            if name in [item['name'].lower().strip()]:
+            if name in item['name'].lower().strip():
                 return item
-    return info[0]
+    
+    return info[0] if isinstance(info, list) and len(info) > 0 else []
 
 
 def process_single(args, api_info, all_flag):
@@ -256,7 +260,7 @@ def process_single(args, api_info, all_flag):
         info = get_mathed_result(info, args[1])
         if info == []:
             print('no result')
-            return agrs[1], []
+            return args[1], []
         if api_info == api.movie_get_person_info:
             return info['name'], print_actor_info(info)
         keys = list(info.keys())
@@ -330,6 +334,7 @@ def print_actor_info(a):
 
 oscar_map_dlc =  np.load('models/processed_data/oscar_map_dlc.npy',allow_pickle=True).tolist()
 def parse_answer(commd):
+    print(f"[DEBUG] Parsing LLM Command: {commd.strip()}")
     pairs = commd.lower().strip().replace('all get', 'get_all').replace('<|endoftext|>', '').replace('\nsort',
                                                                                                      ' sort').split(
         'get_')
@@ -347,6 +352,9 @@ def parse_answer(commd):
                 print('args', args)
                 for i in range(3):
                     args[i] = args[i].strip()
+                    # --- SIMPAN DI SINI ---
+                print(f"[DEBUG] Extracted Args: {args}")
+                # ----------------------
                 all_flag = False
                 if 'all' in args[0]:
                     all_flag = True
@@ -904,7 +912,9 @@ def parse_answer(commd):
                         print('to do3')
                 else:
                     print('2 to do')
-        except:
+        except Exception as e:
+            # Mencetak error agar tidak terjadi silent failure lagi
+            print(f"[DEBUG PARSING ERROR]: {e} pada argumen {args}")
             continue
 
     return result, result_str
@@ -1217,22 +1227,29 @@ def lower_bound(lst, val):
 
 
 def finance_get_result(fun, key):
-    tmpres = fun(key)['result']
-    if tmpres is None or tmpres == {}:
-        try:
-            name = api.finance_get_company_name(key)['result'][0]
-        except:
-            name = api.finance_get_info(key)['result']['longName']
-        print('name', name)
-        ticker = api.finance_get_ticker_by_name(name)['result']
-        print('ticker', ticker)
-        if ticker is not None:
-            tmpres = fun(ticker)['result']
-            return tmpres
-        print('no result')
-        return None
-    else:
+    try:
+        tmpres = fun(key)['result']
+        if not tmpres:
+            try:
+                name_list = api.finance_get_company_name(key)['result']
+                name = name_list[0] if name_list else None
+            except:
+                info = api.finance_get_info(key).get('result', {})
+                name = info.get('longName', None) if isinstance(info, dict) else None
+                
+            if not name:
+                return None
+                
+            ticker_list = api.finance_get_ticker_by_name(name)['result']
+            ticker = ticker_list[0] if ticker_list else None
+            
+            if ticker:
+                return fun(ticker)['result']
+            return None
         return tmpres
+    except Exception as e:
+        print(f"Error in finance_get_result: {e}")
+        return None
 
 
 def is_valid_date_format(date_string):

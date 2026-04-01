@@ -1,6 +1,6 @@
 [workspace]
 authors = ["Luthfi <luthfillahatar@gmail.com>"]
-channels = ["conda-forge"]
+channels = ["conda-forge", "pytorch"]
 name = "ER-RAG"
 platforms = ["win-64"]
 version = "0.1.0"
@@ -9,9 +9,9 @@ version = "0.1.0"
 
 [dependencies]
 python = "3.10.*"
-pytorch = "*"
-transformers = "*"
-pandas = "*"
+pytorch = ">=2.8.0,<3"
+transformers = ">=4.40.2,<5"
+pandas = ">=2.3.3,<3"
 numpy = "<2"
 packaging = "<24"
 huggingface_hub = "<0.23.0"
@@ -23,6 +23,7 @@ scikit-learn = ">=1.7.2,<2"
 sentence-transformers = ">=3.2.0,<4"
 ipykernel = ">=7.2.0,<8"
 regex = ">=2026.3.32,<2027"
+tqdm = ">=4.67.3,<5"
 
 [pypi-dependencies]
 ollama = ">=0.6.1, <0.7"
